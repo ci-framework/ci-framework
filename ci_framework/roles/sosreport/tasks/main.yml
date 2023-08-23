@@ -1,0 +1,41 @@
+---
+- name: Ensure sos is installed
+  become: true
+  ansible.builtin.package:
+    name: sos
+    state: present
+
+- name: Create local "sos" directory
+  ansible.builtin.file:
+    path: "/tmp/sos"
+    state: directory
+
+- name: Print variables
+  ansible.builtin.debug:
+    msg:
+      - "Nodes: {{ cifmw_sosreport_nodes }}"
+      - "SSH Key: {{ cifmw_sosreport_nodes_sshkey }}"
+      - "tmp dir: {{ cifmw_sosreport_tmp_dir }}"
+
+- name: Provide config file for "sos"
+  ansible.builtin.template:
+    src: sos.conf.j2
+    dest: "/tmp/sos/sos.conf"
+
+- name: Display sos.conf
+  command: cat /tmp/sos/sos.conf
+  register: sosfile
+
+- name: Show file content
+  debug:
+    msg: "{{ sosfile.stdout }}"
+
+- name: Ensure that logs directory is writable
+  ansible.builtin.file:
+    path: "{{ cifmw_sosreport_tmp_dir }}"
+    state: directory
+
+- name: Run "sos collect" on given nodes
+  become: true
+  ansible.builtin.command: >
+    sos collect --config-file /tmp/sos/sos.conf
