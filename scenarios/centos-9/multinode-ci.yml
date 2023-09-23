@@ -10,6 +10,11 @@ post_infra:
     inventory: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
     source: fetch_compute_facts.yml
 
+  - name: Generate HCI configuration
+    type: playbook
+    inventory: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+    source: create_hci_configuration.yml
+
 post_ctlplane_deploy:
   - name: Tune rabbitmq resources
     type: playbook

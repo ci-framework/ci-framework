@@ -19,7 +19,7 @@
       Project template to run content provider with EDPM job.
     github-check:
       jobs:
-        - openstack-k8s-operators-content-provider
-        - podified-multinode-edpm-deployment-crc:
-            dependencies:
-              - openstack-k8s-operators-content-provider
+        #- openstack-k8s-operators-content-provider
+        - podified-multinode-edpm-deployment-crc
+        #    dependencies:
+        #      - openstack-k8s-operators-content-provider

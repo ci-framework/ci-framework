@@ -51,7 +51,7 @@
 
 - name: Distribute SSH keypair to EDPM nodes
   tags: admin
-  hosts: edpm
+  hosts: computes
   gather_facts: false
   become: true
   vars:
@@ -80,7 +80,7 @@
 
 - name: Create Block Device on EDPM Nodes
   tags: block
-  hosts: edpm
+  hosts: computes
   gather_facts: true
   become: true
   vars:
@@ -93,9 +93,9 @@
   hosts: localhost
   gather_facts: true
   vars:
-    ssh_network_range: 192.168.122.0/24
-    # storage_network_range: 172.18.0.0/24
-    # storage_mgmt_network_range: 172.20.0.0/24
+    #ssh_network_range: 192.168.122.0/24
+    storage_network_range: 172.18.0.0/24
+    storage_mgmt_network_range: 172.20.0.0/24
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
     - name: Build a dict mapping hostname to its IP which is in management network range
@@ -112,7 +112,7 @@
       delegate_to: "{{ item }}"
       when:
         - hostvars[item]['ansible_hostname'] is defined
-      loop: "{{ groups['edpm'] }}"
+      loop: "{{ groups['computes'] }}"
   roles:
     - role: cifmw_ceph_spec
       cifmw_ceph_spec_host_to_ip: "{{ host_to_ip }}"
@@ -121,7 +121,7 @@
 
 - name: Bootstrap Ceph and apply spec
   tags: cephadm
-  hosts: edpm[0]
+  hosts: computes[0]
   gather_facts: false
   vars:
     ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY') }}"
@@ -178,12 +178,12 @@
       ansible.builtin.set_fact:
         cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first }}"
       vars:
-        this_host: "{{ groups['edpm'][0] }}"
+        this_host: "{{ groups['computes'][0] }}"
 
     - name: Get already assigned IP addresses
       ansible.builtin.set_fact:
         ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
-      loop: "{{ groups['edpm'] }}"
+      loop: "{{ groups['computes'] }}"
 
     # cifmw_cephadm_vip is the VIP reserved in the Storage network
     - name: Set VIP var as empty string

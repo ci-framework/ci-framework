@@ -1,0 +1,139 @@
+---
+- name: Build HCI configuration
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Load parameters
+      ansible.builtin.include_vars:
+        dir: "{{ item }}"
+      loop:
+        - "{{ cifmw_basedir }}/artifacts/parameters"
+        - "/etc/ci/env"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Check we have some compute in inventory
+      ansible.builtin.set_fact:
+        computes_len: "{{ groups['computes'] | length }}"
+
+    - name: Ensure we have needed bits for compute when needed
+      when:
+        - computes_len | int > 0
+      ansible.builtin.assert:
+        that:
+          - "'compute-0' in crc_ci_bootstrap_networks_out"
+          - "'default' in crc_ci_bootstrap_networks_out['compute-0']"
+
+    - name: Prepare EDPM netowork for HCI deployment
+      when:
+        - computes_len | int > 0
+        - cifmw_edpm_deploy_hci | default(false) | bool
+        - "'storage-mgmt' in crc_ci_bootstrap_networks_out['compute-0']"
+      block:
+        - name: Ensure the kustomizations dirs exists
+          ansible.builtin.file:
+            path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/{{ item }}"
+            state: directory
+          loop:
+            - dataplane
+            - hciphase2
+ 
+        - name: Create EDPM CR Kustomization
+          ansible.builtin.copy:
+            dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/dataplane/89-storage-mgmt-kustomization.yaml"
+            content: |-
+              apiVersion: kustomize.config.k8s.io/v1beta1
+              kind: Kustomization
+              resources:
+              namespace: {{ cifmw_install_yamls_defaults.NAMESPACE }}
+              patches:
+              - target:
+                  kind: OpenStackDataPlaneNodeSet
+                patch: |-
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_mtu
+                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu | default(1500) }}
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_mtu
+                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu | default(1500) }}
+
+                  - op: add
+                    path: /spec/nodeTemplate/ansible/ansibleVars/role_networks/-
+                    value: StorageMgmt
+
+                  - op: add
+                    path: /spec/nodeTemplate/ansible/ansibleVars/networks_lower/StorageMgmt
+                    value: storage_mgmt
+
+              {% for compute_node in groups['computes'] %}
+                  - op: add
+                    path: /spec/nodes/edpm-{{ compute_node }}/networks/-
+                    value:
+                      name: StorageMgmt
+                      subnetName: subnet1
+              {% endfor %}
+
+        - name: Enable services needed to deploy Ceph
+          ansible.builtin.copy:
+            dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/dataplane/88-hci-pre-kustomization.yaml"
+            content: |-
+              apiVersion: kustomize.config.k8s.io/v1beta1
+              kind: Kustomization
+              resources:
+              namespace: {{ cifmw_install_yamls_defaults.NAMESPACE }}
+              patches:
+              - target:
+                  kind: OpenStackDataPlaneNodeSet
+                patch: |-
+                  - op: replace
+                    path: /spec/services
+                    value:
+                      - download-cache
+                      - configure-network
+                      - validate-network
+                      - install-os
+                      - ceph-hci-pre
+                      - configure-os
+                      - run-os
+
+        - name: Create configuration to finish HCI deployment
+          ansible.builtin.copy:
+            dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/hciphase2/87-hci-post-kustomization.yaml"
+            content: |-
+              apiVersion: kustomize.config.k8s.io/v1beta1
+              kind: Kustomization
+              resources:
+              namespace: {{ cifmw_install_yamls_defaults.NAMESPACE }}
+              patches:
+              - target:
+                  kind: OpenStackDataPlaneNodeSet
+                patch: |-
+                  - op: add
+                    path: /spec/nodeTemplate/extraMounts
+                    value:
+                      - extraVolType: Ceph
+                        volumes:
+                        - name: ceph
+                          secret:
+                            secretName: ceph-conf-files
+                        mounts:
+                        - name: ceph
+                          mountPath: "/etc/ceph"
+                          readOnly: true
+                  # TODO: move nova to custom service with ceph
+                  - op: replace
+                    path: /spec/services
+                    value:
+                      - download-cache
+                      - configure-network
+                      - validate-network
+                      - install-os
+                      - configure-os
+                      - ceph-hci-pre
+                      - run-os
+                      - ceph-client
+                      - ovn
+                      - libvirt
+                      - nova

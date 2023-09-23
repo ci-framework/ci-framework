@@ -49,7 +49,58 @@
             name: libvirt_manager
             tasks_from: deploy_edpm_compute.yml
 
+        - name: Disable discover_hosts when deploying HCI phase1
+          when: cifmw_edpm_deploy_hci | default(false) | bool
+          ansible.builtin.set_fact:
+            cifmw_edpm_deploy_skip_nova_discover_hosts: true
+
         - name: Deploy EDPM
+          ansible.builtin.import_role:
+            name: edpm_deploy
+
+- name: Deploy ceph deploy playbook
+  ansible.builtin.import_playbook: ceph.yml
+  when: cifmw_edpm_deploy_hci | default(false) | bool
+
+- name: Deploy remaining services when HCI environment
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Create Ceph secrets and retrieve FSID info
+      when: cifmw_edpm_deploy_hci | default(false) | bool
+      block:
+        - name: Create Ceph secrets and retrieve FSID info
+          environment:
+            PATH: "{{ cifmw_path }}"
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+          block:
+            - name: Set ceph secret path
+              ansible.builtin.set_fact:
+                ceph_secret_path: "/tmp/k8s_ceph_secret.yml"
+
+            - name: Create ceph config secret
+              ansible.builtin.command: >-
+                oc apply -f {{ ceph_secret_path }}
+              register: apply_result
+              changed_when: ('stdout' in apply_result) and ('unchanged' not in apply_result.stdout)
+              failed_when: ( apply_result.rc | int ) > 0
+
+            - name: Set Ceph FSID fact
+              ansible.builtin.set_fact:
+                cifmw_edpm_deploy_ceph_fsid: "{{ (lookup('template', ceph_secret_path)|from_yaml).data['ceph.conf'] \
+                | b64decode | regex_search('fsid = (.*)', '\\1')}}"
+
+        - name: Copy kustomizations from phase2 to dataplane dir
+          ansible.builtin.copy:
+            src: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/hciphase2/"
+            dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/dataplane/"
+            remote_src: yes
+
+        - name: Enabled nova discover_hosts after deployment
+          ansible.builtin.set_fact:
+            cifmw_edpm_deploy_skip_nova_discover_hosts: false
+
+        - name: Continue HCI deployment
           ansible.builtin.import_role:
             name: edpm_deploy
 
